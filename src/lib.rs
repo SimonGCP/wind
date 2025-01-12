@@ -71,18 +71,9 @@ impl Router {
             return
         }
 
-        println!("client request: {}", http_request[0]);
+        // println!("client request: {}", http_request[0]);
 
         let content_type = String::from("text/html");
-        let request: Vec<&str> = http_request[0]
-            .as_str()
-            .split("?")
-            .collect();
-
-        for strings in request {
-            println!("{}", strings);
-        }
-
         let request = http_request.get(0).unwrap();
 
         let mut response: Result<Response, std::io::Error> = Err(Error::new(ErrorKind::Other, "Not initialized"));
@@ -125,7 +116,6 @@ impl Router {
 
             for route in &self.routes {
                 if route.path == req_clone {
-                    println!("Route path: \"{}\"", route.path);
                     response = route.get_result(cur_request);
 
                     break;
@@ -137,7 +127,6 @@ impl Router {
                 let e = response.unwrap_err();
                 match e.kind() {
                     ErrorKind::Other => { 
-                        println!("sending: {}{}", self.root, req_clone);
                         let path = format!("{}{}", self.root, req_clone);
                         response = Response::ok(fs::read(path)
                             .unwrap_or(Vec::from(String::from("")))
@@ -149,8 +138,8 @@ impl Router {
         }
         
         let response = response.unwrap_or(Response {
-            code: "400 Bad Request",
-            contents: Vec::from(String::from("Bad Request")),
+            code: response::HTTPCodes::NotFound,
+            contents: Vec::from(String::from("Not Found")),
         });
 
         send_response(content_type, &response, &mut stream).unwrap();
@@ -161,7 +150,7 @@ impl Router {
 
 fn send_response(content_type: String, response: &Response, stream: &mut TcpStream) -> Result<(), std::io::Error> {
     let write_string = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
-        response.code,
+        response.code.as_str(),
         content_type,
         response.contents.len()
     );
@@ -175,7 +164,7 @@ fn send_response(content_type: String, response: &Response, stream: &mut TcpStre
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Param {
     pub key: String,
     pub value: String,
@@ -183,6 +172,8 @@ pub struct Param {
 
 impl Param {
     fn new(param_string: &str) -> Option<Param> {
+        // split between parameters and fragments
+        let param_string = param_string.split("#").next().unwrap();
         let mut split_param = param_string.split("=");
         
         let key = split_param.next();
@@ -203,5 +194,45 @@ impl Param {
         }
 
         Some(Param{ key: String::from(key), value: String::from(value) })
+    }
+}
+
+#[cfg(test)]
+mod router_tests {
+    use super::*;
+    
+    /* test param string splitting */
+    #[test]
+    fn should_split() {
+        let param_str = "name=simon";
+        let param = Param::new(param_str);
+
+        assert_eq!(param.unwrap(), Param{ key: String::from("name"), value: String::from("simon") });
+    }
+
+    #[test]
+    fn should_split_fragment() {
+        let param_str = "name=simon#bottom";
+        let key = String::from("name");
+        let value = String::from("simon");
+
+        let param = Param::new(param_str);
+        assert_eq!(param.unwrap(), Param{ key, value });
+    }
+
+    #[test]
+    fn extra_equals_param() {
+        let param_str = "name=simonage=21";
+        let param = Param::new(param_str);
+
+        assert_eq!(param, None); 
+    }
+
+    #[test]
+    fn no_equals_param() {
+        let param_str = "name";
+        let param = Param::new(param_str);
+
+        assert_eq!(param, None);
     }
 }

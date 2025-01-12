@@ -1,12 +1,10 @@
 use std::fs;
 use std::io::Error;
 
-mod router;
-
-use router::{Router, Request, Response, response::HTTPCodes::*};
+use cli_chat::{Router, Request, Response, response::HTTPCodes::*};
 
 fn main() -> std::io::Result<()> {
-    let _loopback = "127.0.0.1:80";
+    let _loopback = "127.0.0.1:8000";
     let _myip = "172.16.14.193:80";
 
     let mut router = Router::new("client");
@@ -17,8 +15,8 @@ fn main() -> std::io::Result<()> {
         if contents.is_ok() {
             Response::ok(contents.unwrap())
         } else {
-            let vec = Vec::from(String::from("Not Found").as_bytes());
-            Response::new(NotFound.as_str(), vec)
+            let vec = Vec::from("Not Found".as_bytes());
+            Response::new(NotFound, vec)
         }
     })).unwrap();
 
@@ -31,7 +29,7 @@ fn main() -> std::io::Result<()> {
         if param.is_some() {
             Response::ok(Vec::from(param.unwrap().value.as_str().as_bytes()))
         } else {
-            Response::new(BadRequest.as_str(), Vec::from("No parameters given"))
+            Response::new(BadRequest, Vec::from("No parameters given"))
         }
     })).unwrap();
 
@@ -41,7 +39,7 @@ fn main() -> std::io::Result<()> {
         println!("Params: {:?}", params);
 
         let vec = Vec::from(String::from("OK!").as_bytes());
-        Response::new(OK.as_str(), vec)
+        Response::new(OK, vec)
     })).unwrap();
 
     router.listen(_loopback);

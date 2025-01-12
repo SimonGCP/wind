@@ -1,26 +1,27 @@
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Response {
-    pub code: &'static str,
+    pub code: HTTPCodes,
     pub contents: Vec<u8>,
 }
 
 impl Response {
-    pub fn new(code: &'static str, contents: Vec<u8>) -> Result<Response, std::io::Error> {
+    pub fn new(code: HTTPCodes, contents: Vec<u8>) -> Result<Response, std::io::Error> {
         Ok(Response{code, contents})
     }
 
     pub fn ok(contents: Vec<u8>) -> Result<Response, std::io::Error> {
-        Ok(Response{code: "200 OK", contents})
+        Ok(Response{code: HTTPCodes::OK, contents})
     }
 
     pub fn header_string(&self) -> String {
         format!("HTTP/1.1 {}\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n",
-            self.code,
+            self.code.as_str(),
             self.contents.len()
         )
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum HTTPCodes {
     // Informational Codes (100–199)
     Continue,
