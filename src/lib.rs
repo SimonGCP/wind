@@ -3,15 +3,18 @@ use std::{
         TcpStream, 
         TcpListener
     },
-    fs,
     io::{
         Write,
         BufReader,
         prelude::*,
-        Error,
-        ErrorKind,
     },
     vec::Vec,
+    sync::{
+        Arc,
+        Mutex,
+        mpsc,
+    },
+    thread,
 };
 
 pub mod route;
@@ -23,17 +26,17 @@ pub use response::Response;
 pub use request::Request;
 
 pub struct Router {
-    root: String,
     routes: Vec<Route>,   
+    pool: ThreadPool,
 }
 
 impl Router {
-    pub fn new(root: &str) -> Router {
-        let root = root.to_string();
+    pub fn new() -> Router {
+        let pool= ThreadPool::new(20);
 
         Router {
-            root: root.to_string(),
             routes: Vec::new(),
+            pool,
         }
     }
 
@@ -44,21 +47,28 @@ impl Router {
         for client in listener.incoming() {
             match client {
                 Ok(stream) => {
-                    self.handle_client(stream); 
+                    let routes = self.routes.clone();
+
+                    self.pool.execute(move || {
+                        Router::handle_client(routes, stream);
+                    });
                 }
                 Err(e) => panic!("Error connecting: {e}"),
             }
         }
     }
 
-    pub fn route(&mut self, path: &str, result: Box<dyn Fn(Request) -> Result<Response, Error>>) -> Result<(), String> {
-        let new_route = Route::new(path, Box::new(result)); 
+    pub fn route(&mut self, path: &str, result: Arc<dyn Fn(&Request) -> Response + Send + Sync + 'static>) {
+        let new_route = Route::new(path, result); 
         self.routes.push(new_route); 
-
-        Ok(())
     }
 
-    pub fn handle_client(&self, mut stream: TcpStream) {
+    pub fn use_middleware(&mut self, result: Arc<dyn Fn(&Request) -> Response + Send + Sync + 'static>) {
+        let new_middleware = Route::middleware(result);    
+        self.routes.push(new_middleware);
+    }
+
+    pub fn handle_client(routes: Vec<Route>, mut stream: TcpStream) {
         let buf_reader = BufReader::new(&stream);
         let http_request: Vec<_> = buf_reader
             .lines()
@@ -76,7 +86,7 @@ impl Router {
         let content_type = String::from("text/html");
         let request = http_request.get(0).unwrap();
 
-        let mut response: Result<Response, std::io::Error> = Err(Error::new(ErrorKind::Other, "Not initialized"));
+        let mut response: Option<Response> = None;
 
         if request.starts_with("GET") {
             let request = &request[4..]; // remove GET part of request
@@ -114,35 +124,31 @@ impl Router {
                 params.unwrap_or(vec![])
             );
 
-            for route in &self.routes {
-                if route.path == req_clone {
-                    response = route.get_result(cur_request);
+            for route in routes {
+                if route.path == req_clone || route.middleware {
+                    response = Some(route.get_result(&cur_request));
 
-                    break;
+                    println!("response: {}", response.clone().unwrap().next);
+
+                    if !response.clone().unwrap().next {
+                        break;
+                    }
                 } 
             }
+        }
 
-            // if no route, check for matching files
-            if response.is_err() {
-                let e = response.unwrap_err();
-                match e.kind() {
-                    ErrorKind::Other => { 
-                        let path = format!("{}{}", self.root, req_clone);
-                        response = Response::ok(fs::read(path)
-                            .unwrap_or(Vec::from(String::from("")))
-                        )
-                    },
-                    _ => panic!("{:?}", e),
-                }
-            }
+        if response.is_none() {
+            response = Some(Response{code: response::HTTPCodes::NotFound, contents: Vec::new(), next: false });
         }
         
-        let response = response.unwrap_or(Response {
-            code: response::HTTPCodes::NotFound,
-            contents: Vec::from(String::from("Not Found")),
-        });
+        // let response = response.unwrap_or(Response {
+        //     code: response::HTTPCodes::NotFound,
+        //     contents: Vec::from(String::from("Not Found")),
+        // });
 
-        send_response(content_type, &response, &mut stream).unwrap();
+        println!("response: {:?}", response.clone().unwrap().code);
+
+        send_response(content_type, &response.unwrap(), &mut stream).unwrap();
     }
 }
 
@@ -194,6 +200,82 @@ impl Param {
         }
 
         Some(Param{ key: String::from(key), value: String::from(value) })
+    }
+}
+
+// multithreading structs
+
+struct Worker {
+    id: usize,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+type Job = Box<dyn FnOnce() + Send + 'static>;
+
+enum Message {
+    NewJob(Job),
+    Terminate,
+}
+
+impl Worker {
+    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Message>>>) -> Worker {
+        let thread = thread::spawn(move || loop {
+            let message = receiver.lock().unwrap().recv().unwrap();
+
+            match message {
+                Message::NewJob(job) => {
+                    println!("Worker {} got a job: executing", id);
+                    job();
+                },
+                Message::Terminate => {
+                    break;
+                }
+            }
+        });
+
+        Worker { id, thread: Some(thread) }
+    }
+}
+
+struct ThreadPool {
+    workers: Vec<Worker>,
+    sender: mpsc::Sender<Message>,
+}
+
+impl ThreadPool {
+    fn new(thread_count: usize) -> ThreadPool {
+        assert!(thread_count > 0);
+
+        let (sender, receiver) = mpsc::channel();
+        let receiver = Arc::new(Mutex::new(receiver));
+
+        let mut workers = Vec::with_capacity(thread_count);
+        for id in 0..thread_count {
+            workers.push(Worker::new(id, Arc::clone(&receiver)));
+        }
+
+        ThreadPool { workers, sender }
+    }
+    
+    pub fn execute<F>(&self, job: F)
+        where F: FnOnce() + Send + 'static,
+    {
+        let job = Box::new(job);
+        self.sender.send(Message::NewJob(job)).unwrap();
+    }
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        for _ in &self.workers {
+            self.sender.send(Message::Terminate).unwrap();
+        }
+
+        for worker in &mut self.workers {
+            if let Some(thread) = worker.thread.take() {
+                thread.join().unwrap();
+            }
+        }
     }
 }
 

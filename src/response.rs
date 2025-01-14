@@ -1,16 +1,21 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Response {
     pub code: HTTPCodes,
     pub contents: Vec<u8>,
+    pub next: bool,
 }
 
 impl Response {
-    pub fn new(code: HTTPCodes, contents: Vec<u8>) -> Result<Response, std::io::Error> {
-        Ok(Response{code, contents})
+    pub fn new(code: HTTPCodes, contents: Vec<u8>) -> Response {
+        Response{code, contents, next: false}
     }
 
-    pub fn ok(contents: Vec<u8>) -> Result<Response, std::io::Error> {
-        Ok(Response{code: HTTPCodes::OK, contents})
+    pub fn ok(contents: Vec<u8>) -> Response {
+        Response{code: HTTPCodes::OK, contents, next: false}
+    }
+
+    pub fn next() -> Response {
+        Response{code: HTTPCodes::OK, contents: Vec::new(), next: true}
     }
 
     pub fn header_string(&self) -> String {
@@ -21,7 +26,7 @@ impl Response {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum HTTPCodes {
     // Informational Codes (100–199)
     Continue,

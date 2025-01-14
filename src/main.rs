@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Error;
+use std::sync::Arc;
 
 use cli_chat::{Router, Request, Response, response::HTTPCodes::*};
 
@@ -7,8 +7,15 @@ fn main() -> std::io::Result<()> {
     let _loopback = "127.0.0.1:8000";
     let _myip = "172.16.14.193:80";
 
-    let mut router = Router::new("client");
-    router.route("/", Box::new(|_request: Request| -> Result<Response, Error> {
+    let router = &mut Router::new();
+
+    // test middleware
+    router.use_middleware(Arc::new(|_request: &Request| -> Response {
+        println!("Hello from middleware!");
+        Response::next()
+    }));
+
+    router.route("/", Arc::new(|_request: &Request| -> Response {
         println!("Request: {:?}", _request);
         let contents = fs::read("../client/webpage.html");
 
@@ -18,9 +25,9 @@ fn main() -> std::io::Result<()> {
             let vec = Vec::from("Not Found".as_bytes());
             Response::new(NotFound, vec)
         }
-    })).unwrap();
+    }));
 
-    router.route("/get_some_info", Box::new(|_request: Request| -> Result<Response, Error> {
+    router.route("/get_some_info", Arc::new(|_request: &Request| -> Response {
         println!("Request: {:?}", _request);
         println!("Params: {:?}", _request.params);
         // let contents = fs::read("client/data/some_data.json");
@@ -31,18 +38,24 @@ fn main() -> std::io::Result<()> {
         } else {
             Response::new(BadRequest, Vec::from("No parameters given"))
         }
-    })).unwrap();
+    }));
 
-    router.route("/write_some_info", Box::new(|_request: Request| -> Result<Response, Error> {
+    router.route("/write_some_info", Arc::new(|_request: &Request| -> Response {
         println!("Request: {:?}", _request);
-        let params = _request.params;
+        let params = &_request.params;
         println!("Params: {:?}", params);
 
         let vec = Vec::from(String::from("OK!").as_bytes());
         Response::new(OK, vec)
-    })).unwrap();
+    }));
 
-    router.listen(_loopback);
+    router.route("/slow_request", Arc::new(|_request: &Request| -> Response {
+        std::thread::sleep(std::time::Duration::from_secs(10));
+
+        Response::ok(Vec::from("OK!".as_bytes()))
+    }));
+
+    router.listen( _loopback);
 
     Ok(())
 }
