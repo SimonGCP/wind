@@ -1,11 +1,11 @@
 use std::fs;
 use std::sync::Arc;
 
-use cli_chat::{Router, Request, Response, response::HTTPCodes::*, Param};
+use wind::{Router, Request, Response, response::HTTPCodes::*, Param};
 
 fn main() -> std::io::Result<()> {
     let _loopback = "127.0.0.1:8000";
-    let _myip = "172.16.14.193:80";
+    let _myip = "172.29.150.135:80";
 
     let router = &mut Router::new();
 
@@ -66,7 +66,7 @@ fn main() -> std::io::Result<()> {
         _res.next();
     }));
 
-    router.listen( _loopback);
+    router.listen( _myip);
 
     Ok(())
 }

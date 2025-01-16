@@ -87,7 +87,7 @@ impl Router {
     pub fn handle_client(routes: Vec<Route>, mut stream: TcpStream) {
         let req = Request::new(&stream);
         if req.is_err() {
-            send_response(
+            Self::send_response(
                 "text/html".to_string(), 
                 &Response::new(response::HTTPCodes::BadRequest, Vec::from("could not parse request")),
                 &mut stream
@@ -113,35 +113,37 @@ impl Router {
             } 
         }
 
-        send_response("text/html".to_string(), &res, &mut stream).unwrap();
+        Self::send_response("text/html".to_string(), &res, &mut stream).unwrap();
+    }
+
+
+    fn send_response(content_type: String, response: &Response, stream: &mut TcpStream) -> Result<(), std::io::Error> {
+        let mut write_string = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n",
+            response.code.as_str(),
+            content_type,
+            response.contents.len()
+        );
+
+        for header in response.headers.clone() {
+            println!("header: {}", header);
+            write_string.push_str(format!("{}\r\n", header).as_str());
+        }
+
+        write_string.push_str("\r\n");
+
+        let write_string = write_string.as_bytes();
+
+        let res1 = stream.write_all(write_string);
+        if res1.is_err() {
+            res1
+        } else {
+            stream.write_all(response.contents.as_slice())
+        }
     }
 }
 
 // helper functions
 
-fn send_response(content_type: String, response: &Response, stream: &mut TcpStream) -> Result<(), std::io::Error> {
-    let mut write_string = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n",
-        response.code.as_str(),
-        content_type,
-        response.contents.len()
-    );
-
-    for header in response.headers.clone() {
-        println!("header: {}", header);
-        write_string.push_str(format!("{}\r\n", header).as_str());
-    }
-
-    write_string.push_str("\r\n");
-
-    let write_string = write_string.as_bytes();
-
-    let res1 = stream.write_all(write_string);
-    if res1.is_err() {
-        res1
-    } else {
-        stream.write_all(response.contents.as_slice())
-    }
-}
 
 #[derive(Debug, PartialEq)]
 pub struct Param {

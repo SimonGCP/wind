@@ -1,5 +1,5 @@
 [package]
-name = "cli_chat"
+name = "wind"
 version = "0.1.0"
 edition = "2021"
 
