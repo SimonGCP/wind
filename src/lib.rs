@@ -3,11 +3,7 @@ use std::{
         TcpStream, 
         TcpListener
     },
-    io::{
-        Write,
-        BufReader,
-        prelude::*,
-    },
+    io::Write,
     vec::Vec,
     sync::{
         Arc,
@@ -40,6 +36,31 @@ impl Router {
         }
     }
 
+    pub fn route(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
+        let new_route = Route::new(path, "", result); 
+        self.routes.push(new_route); 
+    }
+
+    pub fn get(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
+        let new_route = Route::new(path, "GET", result); 
+        self.routes.push(new_route); 
+    }
+    
+    pub fn post(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
+        let new_route = Route::new(path, "POST", result); 
+        self.routes.push(new_route); 
+    }
+    
+    pub fn put(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
+        let new_route = Route::new(path, "PUT", result); 
+        self.routes.push(new_route); 
+    }
+
+    pub fn delete(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
+        let new_route = Route::new(path, "DELETE", result); 
+        self.routes.push(new_route); 
+    }
+
     pub fn listen(&self, address: &str) {
         let listener: TcpListener = TcpListener::bind(address).unwrap();
 
@@ -58,108 +79,60 @@ impl Router {
         }
     }
 
-    pub fn route(&mut self, path: &str, result: Arc<dyn Fn(&Request) -> Response + Send + Sync + 'static>) {
-        let new_route = Route::new(path, result); 
-        self.routes.push(new_route); 
-    }
-
-    pub fn use_middleware(&mut self, result: Arc<dyn Fn(&Request) -> Response + Send + Sync + 'static>) {
+    pub fn use_middleware(&mut self, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
         let new_middleware = Route::middleware(result);    
         self.routes.push(new_middleware);
     }
 
     pub fn handle_client(routes: Vec<Route>, mut stream: TcpStream) {
-        let buf_reader = BufReader::new(&stream);
-        let http_request: Vec<_> = buf_reader
-            .lines()
-            .map(|result| result.unwrap())
-            .take_while(|line| !line.is_empty())
-            .collect();
+        let req = Request::new(&stream);
+        if req.is_err() {
+            send_response(
+                "text/html".to_string(), 
+                &Response::new(response::HTTPCodes::BadRequest, Vec::from("could not parse request")),
+                &mut stream
+            ).unwrap();
 
-        if http_request.len() < 1 {
-            println!("{:?}", http_request);
-            return
-        }
+            return;
+        } 
 
-        // println!("client request: {}", http_request[0]);
 
-        let content_type = String::from("text/html");
-        let request = http_request.get(0).unwrap();
+        let mut req = req.unwrap();
+        let mut res =  Response::empty();
+        let mut res_sent = false;
 
-        let mut response: Option<Response> = None;
+        println!("body: {:?}", String::from_utf8(req.body.clone()));
 
-        if request.starts_with("GET") {
-            let request = &request[4..]; // remove GET part of request
+        for route in routes {
+            if (route.path == req.query && route.method == req.method && !res_sent) || route.middleware {
+                route.get_result(&mut req, &mut res);
 
-            // checks if the HTTP request has extra parameters
-            let contains_params = request.contains("?"); 
-            let request = request.replace("?", " "); 
-
-            let words: Vec<_> = request.split(" ").collect();
-            let request = String::from(*words.get(0).unwrap());
-
-            let params = match contains_params {
-                true => {
-                    let param_string = String::from(*words.get(1).unwrap());
-                    let param_split= param_string.split("&"); 
-                    let mut param_vec: Vec<Param> = vec![];
-
-                    for param in param_split {
-                        let param = Param::new(param); 
-                        if param.is_some() {
-                            param_vec.push(param.unwrap());
-                        }
-                    }
-
-                    Some(param_vec)
+                if !res.next {
+                    res_sent = true;
                 }
-                false => None, 
-            };
-
-            let req_clone = request.clone();
-
-            let cur_request = Request::new(
-                String::from("GET"),
-                request,
-                params.unwrap_or(vec![])
-            );
-
-            for route in routes {
-                if route.path == req_clone || route.middleware {
-                    response = Some(route.get_result(&cur_request));
-
-                    println!("response: {}", response.clone().unwrap().next);
-
-                    if !response.clone().unwrap().next {
-                        break;
-                    }
-                } 
-            }
+            } 
         }
 
-        if response.is_none() {
-            response = Some(Response{code: response::HTTPCodes::NotFound, contents: Vec::new(), next: false });
-        }
-        
-        // let response = response.unwrap_or(Response {
-        //     code: response::HTTPCodes::NotFound,
-        //     contents: Vec::from(String::from("Not Found")),
-        // });
-
-        println!("response: {:?}", response.clone().unwrap().code);
-
-        send_response(content_type, &response.unwrap(), &mut stream).unwrap();
+        send_response("text/html".to_string(), &res, &mut stream).unwrap();
     }
 }
 
 // helper functions
 
 fn send_response(content_type: String, response: &Response, stream: &mut TcpStream) -> Result<(), std::io::Error> {
-    let write_string = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
+    let mut write_string = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n",
         response.code.as_str(),
         content_type,
         response.contents.len()
     );
+
+    for header in response.headers.clone() {
+        println!("header: {}", header);
+        write_string.push_str(format!("{}\r\n", header).as_str());
+    }
+
+    write_string.push_str("\r\n");
+
     let write_string = write_string.as_bytes();
 
     let res1 = stream.write_all(write_string);
@@ -177,7 +150,7 @@ pub struct Param {
 }
 
 impl Param {
-    fn new(param_string: &str) -> Option<Param> {
+    pub fn new(param_string: &str) -> Option<Param> {
         // split between parameters and fragments
         let param_string = param_string.split("#").next().unwrap();
         let mut split_param = param_string.split("=");
@@ -224,7 +197,7 @@ impl Worker {
 
             match message {
                 Message::NewJob(job) => {
-                    println!("Worker {} got a job: executing", id);
+                    // println!("Worker {} got a job: executing", id);
                     job();
                 },
                 Message::Terminate => {

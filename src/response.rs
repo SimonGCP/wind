@@ -2,20 +2,26 @@
 pub struct Response {
     pub code: HTTPCodes,
     pub contents: Vec<u8>,
+    pub headers: Vec<String>,
     pub next: bool,
 }
 
 impl Response {
+    pub fn empty() -> Response {
+        Response{
+            code: HTTPCodes::NotFound,
+            contents: Vec::new(),
+            headers: Vec::new(),
+            next: false,
+        }
+    }
+
     pub fn new(code: HTTPCodes, contents: Vec<u8>) -> Response {
-        Response{code, contents, next: false}
+        Response{code, contents, headers: Vec::new(), next: false}
     }
 
     pub fn ok(contents: Vec<u8>) -> Response {
-        Response{code: HTTPCodes::OK, contents, next: false}
-    }
-
-    pub fn next() -> Response {
-        Response{code: HTTPCodes::OK, contents: Vec::new(), next: true}
+        Response{code: HTTPCodes::OK, contents, headers: Vec::new(), next: false}
     }
 
     pub fn header_string(&self) -> String {
@@ -23,6 +29,16 @@ impl Response {
             self.code.as_str(),
             self.contents.len()
         )
+    }
+
+    pub fn send(&mut self, code: HTTPCodes, contents: Vec<u8>) {
+        self.code = code;
+        self.contents = contents;
+        self.next = false;
+    }
+
+    pub fn next(&mut self) {
+        self.next = true;
     }
 }
 

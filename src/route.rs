@@ -11,7 +11,8 @@ pub enum Next {
 #[derive(Clone)]
 pub struct Route {
     pub path: String,
-    pub result: Arc<dyn Fn(&Request) -> Response + Send + Sync + 'static>,
+    pub method: String,
+    pub result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>,
     pub middleware: bool
 }
 
@@ -22,16 +23,16 @@ impl std::fmt::Display for Route {
 }
 
 impl Route {
-    pub fn new (path: &str, result: Arc<dyn Fn(&Request) -> Response + Send + Sync + 'static>) -> Route {
-        Route { path: path.to_string(), result, middleware: false }
+    pub fn new (path: &str, method: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) -> Route {
+        Route { path: path.to_string(), method: method.to_string(), result, middleware: false }
     }
 
-    pub fn middleware(result: Arc<dyn Fn(&Request) -> Response + Send + Sync + 'static>) -> Route {
-        Route { path: "".to_string(), result, middleware: true }
+    pub fn middleware(result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) -> Route {
+        Route { path: "".to_string(), method: "".to_string(), result, middleware: true }
     }
 
-    pub fn get_result(&self, req: &Request) -> Response {
-        (self.result)(req)
+    pub fn get_result(&self, req: &mut Request, res: &mut Response) {
+        (self.result)(req, res)
     }
 }
 

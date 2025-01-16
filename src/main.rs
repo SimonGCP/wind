@@ -1,7 +1,7 @@
 use std::fs;
 use std::sync::Arc;
 
-use cli_chat::{Router, Request, Response, response::HTTPCodes::*};
+use cli_chat::{Router, Request, Response, response::HTTPCodes::*, Param};
 
 fn main() -> std::io::Result<()> {
     let _loopback = "127.0.0.1:8000";
@@ -10,49 +10,60 @@ fn main() -> std::io::Result<()> {
     let router = &mut Router::new();
 
     // test middleware
-    router.use_middleware(Arc::new(|_request: &Request| -> Response {
-        println!("Hello from middleware!");
-        Response::next()
+    router.use_middleware(Arc::new(|_req: &mut Request, _res: &mut Response| {
+        let param = Param::new("name=simon");
+        if param.is_some() {
+            _req.params.push(param.unwrap());
+        }
+
+        _res.headers.push("Access-Control-Allow-Origin: *".to_string());
+        
+        _res.next();
     }));
 
-    router.route("/", Arc::new(|_request: &Request| -> Response {
-        println!("Request: {:?}", _request);
+    router.get("/", Arc::new(|_req: &mut Request, _res: &mut Response| {
+        // println!("Request: {:?}", _req);
         let contents = fs::read("../client/webpage.html");
 
         if contents.is_ok() {
-            Response::ok(contents.unwrap())
+            *_res = Response::ok(contents.unwrap());
         } else {
             let vec = Vec::from("Not Found".as_bytes());
-            Response::new(NotFound, vec)
+            *_res = Response::new(NotFound, vec);
         }
     }));
 
-    router.route("/get_some_info", Arc::new(|_request: &Request| -> Response {
-        println!("Request: {:?}", _request);
-        println!("Params: {:?}", _request.params);
-        // let contents = fs::read("client/data/some_data.json");
-        let param = _request.params.get(0);
+    router.get("/images/default-dance-fortnite.gif", Arc::new(|_req: &mut Request, _res: &mut Response| {
+        let contents = fs::read("../client/images/default-dance-fortnite.gif");
 
-        if param.is_some() {
-            Response::ok(Vec::from(param.unwrap().value.as_str().as_bytes()))
+        if contents.is_ok() {
+            _res.send(OK, contents.unwrap());
         } else {
-            Response::new(BadRequest, Vec::from("No parameters given"))
+            let vec = Vec::from("fortnite gif not found :(".as_bytes());
+            _res.send(InternalServerError, vec);
         }
     }));
 
-    router.route("/write_some_info", Arc::new(|_request: &Request| -> Response {
-        println!("Request: {:?}", _request);
-        let params = &_request.params;
-        println!("Params: {:?}", params);
-
-        let vec = Vec::from(String::from("OK!").as_bytes());
-        Response::new(OK, vec)
+    router.get("/get_some_info", Arc::new(|_req: &mut Request, _res: &mut Response| {
+        _res.send(OK, Vec::from("Hello world!"));
     }));
 
-    router.route("/slow_request", Arc::new(|_request: &Request| -> Response {
-        std::thread::sleep(std::time::Duration::from_secs(10));
+    router.post("/same_url", Arc::new(|_req: &mut Request, _res: &mut Response| {
+        _res.send(OK, Vec::from("Hello from post!"));
+    }));
 
-        Response::ok(Vec::from("OK!".as_bytes()))
+    router.get("/same_url", Arc::new(|_req: &mut Request, _res: &mut Response| {
+        _res.send(OK, Vec::from("Hello from get!"));
+    }));
+
+    router.post("/send_body", Arc::new(|_req: &mut Request, _res: &mut Response| {
+        _res.send(OK, _req.body.clone());
+    }));
+
+    router.use_middleware(Arc::new(|_req: &mut Request, _res: &mut Response| {
+        println!("{}: {}", _req.query, _res.code.as_str());         
+        
+        _res.next();
     }));
 
     router.listen( _loopback);
