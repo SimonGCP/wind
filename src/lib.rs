@@ -5,42 +5,40 @@ use std::{
     },
     io::Write,
     vec::Vec,
-    sync::{
-        Arc,
-        Mutex,
-        mpsc,
-    },
-    thread,
+    sync::Arc,
 };
 
 pub mod route;
 pub mod response;
 pub mod request;
+pub mod router;
+pub mod threadpool;
 
 pub use route::Route;
+pub use router::Router;
 pub use response::Response;
 pub use request::Request;
+pub use threadpool::ThreadPool;
 
-pub struct Router {
-    routes: Vec<Route>,   
+pub struct Server {
+    routes: Vec<Route>,
+    routers: Vec<Router>,
     pool: ThreadPool,
 }
 
-impl Router {
-    pub fn new() -> Router {
-        let pool= ThreadPool::new(20);
+impl Server {
+    pub fn new() -> Server {
+        let pool = ThreadPool::new(20);
 
-        Router {
+        Server {
             routes: Vec::new(),
+            routers: Vec::new(),
             pool,
         }
     }
+}
 
-    pub fn route(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
-        let new_route = Route::new(path, "", result); 
-        self.routes.push(new_route); 
-    }
-
+impl Server {
     pub fn get(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
         let new_route = Route::new(path, "GET", result); 
         self.routes.push(new_route); 
@@ -69,9 +67,10 @@ impl Router {
             match client {
                 Ok(stream) => {
                     let routes = self.routes.clone();
+                    let routers = self.routers.clone();
 
                     self.pool.execute(move || {
-                        Router::handle_client(routes, stream);
+                        Server::handle_client(routes, routers, stream);
                     });
                 }
                 Err(e) => panic!("Error connecting: {e}"),
@@ -84,7 +83,11 @@ impl Router {
         self.routes.push(new_middleware);
     }
 
-    pub fn handle_client(routes: Vec<Route>, mut stream: TcpStream) {
+    pub fn use_router(&mut self, router: Router) {
+        self.routers.push(router);
+    }
+
+    pub fn handle_client(routes: Vec<Route>, routers: Vec<Router>, mut stream: TcpStream) {
         let req = Request::new(&stream);
         if req.is_err() {
             Self::send_response(
@@ -101,7 +104,18 @@ impl Router {
         let mut res =  Response::empty();
         let mut res_sent = false;
 
-        println!("body: {:?}", String::from_utf8(req.body.clone()));
+        println!("query: {}", req.query);
+        for router in routers {
+            println!("router path: {}", router.root);
+            if req.query.starts_with(router.root.as_str()) {
+                let sheared_query = req.query
+                    .clone()
+                    .replace(router.root.as_str(), "");
+
+                println!("shread query: {}", sheared_query.clone());
+                res_sent = router.handle_client(sheared_query, &mut req, &mut res);
+            }
+        }
 
         for route in routes {
             if (route.path == req.query && route.method == req.method && !res_sent) || route.middleware {
@@ -113,7 +127,10 @@ impl Router {
             } 
         }
 
-        Self::send_response("text/html".to_string(), &res, &mut stream).unwrap();
+        let result = Self::send_response("text/html".to_string(), &res, &mut stream);
+        if result.is_err() {
+            eprintln!("Error sending response: {}", result.err().unwrap());
+        }
     }
 
 
@@ -125,7 +142,6 @@ impl Router {
         );
 
         for header in response.headers.clone() {
-            println!("header: {}", header);
             write_string.push_str(format!("{}\r\n", header).as_str());
         }
 
@@ -142,9 +158,7 @@ impl Router {
     }
 }
 
-// helper functions
-
-
+// Parameter Struct
 #[derive(Debug, PartialEq)]
 pub struct Param {
     pub key: String,
@@ -180,79 +194,79 @@ impl Param {
 
 // multithreading structs
 
-struct Worker {
-    id: usize,
-    thread: Option<thread::JoinHandle<()>>,
-}
-
-type Job = Box<dyn FnOnce() + Send + 'static>;
-
-enum Message {
-    NewJob(Job),
-    Terminate,
-}
-
-impl Worker {
-    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Message>>>) -> Worker {
-        let thread = thread::spawn(move || loop {
-            let message = receiver.lock().unwrap().recv().unwrap();
-
-            match message {
-                Message::NewJob(job) => {
-                    // println!("Worker {} got a job: executing", id);
-                    job();
-                },
-                Message::Terminate => {
-                    break;
-                }
-            }
-        });
-
-        Worker { id, thread: Some(thread) }
-    }
-}
-
-struct ThreadPool {
-    workers: Vec<Worker>,
-    sender: mpsc::Sender<Message>,
-}
-
-impl ThreadPool {
-    fn new(thread_count: usize) -> ThreadPool {
-        assert!(thread_count > 0);
-
-        let (sender, receiver) = mpsc::channel();
-        let receiver = Arc::new(Mutex::new(receiver));
-
-        let mut workers = Vec::with_capacity(thread_count);
-        for id in 0..thread_count {
-            workers.push(Worker::new(id, Arc::clone(&receiver)));
-        }
-
-        ThreadPool { workers, sender }
-    }
-    
-    pub fn execute<F>(&self, job: F)
-        where F: FnOnce() + Send + 'static,
-    {
-        let job = Box::new(job);
-        self.sender.send(Message::NewJob(job)).unwrap();
-    }
-}
-
-impl Drop for ThreadPool {
-    fn drop(&mut self) {
-        for _ in &self.workers {
-            self.sender.send(Message::Terminate).unwrap();
-        }
-
-        for worker in &mut self.workers {
-            if let Some(thread) = worker.thread.take() {
-                thread.join().unwrap();
-            }
-        }
-    }
-}
+// struct Worker {
+//     _id: usize,
+//     thread: Option<thread::JoinHandle<()>>,
+// }
+// 
+// type Job = Box<dyn FnOnce() + Send + 'static>;
+// 
+// enum Message {
+//     NewJob(Job),
+//     Terminate,
+// }
+// 
+// impl Worker {
+//     fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Message>>>) -> Worker {
+//         let thread = thread::spawn(move || loop {
+//             let message = receiver.lock().unwrap().recv().unwrap();
+// 
+//             match message {
+//                 Message::NewJob(job) => {
+//                     // println!("Worker {} got a job: executing", id);
+//                     job();
+//                 },
+//                 Message::Terminate => {
+//                     break;
+//                 }
+//             }
+//         });
+// 
+//         Worker { _id: id, thread: Some(thread) }
+//     }
+// }
+// 
+// struct ThreadPool {
+//     workers: Vec<Worker>,
+//     sender: mpsc::Sender<Message>,
+// }
+// 
+// impl ThreadPool {
+//     fn new(thread_count: usize) -> ThreadPool {
+//         assert!(thread_count > 0);
+// 
+//         let (sender, receiver) = mpsc::channel();
+//         let receiver = Arc::new(Mutex::new(receiver));
+// 
+//         let mut workers = Vec::with_capacity(thread_count);
+//         for id in 0..thread_count {
+//             workers.push(Worker::new(id, Arc::clone(&receiver)));
+//         }
+// 
+//         ThreadPool { workers, sender }
+//     }
+//     
+//     pub fn execute<F>(&self, job: F)
+//         where F: FnOnce() + Send + 'static,
+//     {
+//         let job = Box::new(job);
+//         self.sender.send(Message::NewJob(job)).unwrap();
+//     }
+// }
+// 
+// impl Drop for ThreadPool {
+//     fn drop(&mut self) {
+//         for _ in &self.workers {
+//             self.sender.send(Message::Terminate).unwrap();
+//         }
+// 
+//         for worker in &mut self.workers {
+//             if let Some(thread) = worker.thread.take() {
+//                 thread.join().unwrap();
+//             }
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod router_tests {
