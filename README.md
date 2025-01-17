@@ -6,7 +6,7 @@ This project is a work in progress and still needs more documentation and testin
 Creating this project was out of personal interest to delve deeper into how HTTP servers parse requests and send responses. It also provided an opportunity to do some work with Rust and low level socket programming.
 
 ## Features:
-# Server:
+### Server:
 To create a server, use:
 ```rust
 fn main() {
@@ -19,7 +19,7 @@ fn main() {
 }
 ```
 
-# Routing:
+### Routing:
 Creating routes for your server is done like so:
 ```rust
 fn main() {
@@ -37,7 +37,7 @@ Use `sudo cargo run` to start the server: then use `curl http://localhost:80/hel
 
 You can also use the `Router` struct to organize routing
 
-# Middleware
+### Middleware
 The server supports middleware function. To create a middleware function, use `server.use_middleware`
 ```rust
 fn main() {
