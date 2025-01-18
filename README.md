@@ -46,6 +46,8 @@ fn main() {
     server.use_middleware(Arc::new(|_req: &mut Request, _res: &mut Response| {
         // log the HTTP code of the Response
         println!("{}: {}", _req.query, _res.code.as_str());
+
+        _res.next();
     });
 
     /* ... */

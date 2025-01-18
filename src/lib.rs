@@ -40,21 +40,29 @@ impl Server {
 
 impl Server {
     pub fn get(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
+        assert!(path.starts_with("/"));
+
         let new_route = Route::new(path, "GET", result); 
         self.routes.push(new_route); 
     }
     
     pub fn post(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
+        assert!(path.starts_with("/"));
+
         let new_route = Route::new(path, "POST", result); 
         self.routes.push(new_route); 
     }
     
     pub fn put(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
+        assert!(path.starts_with("/"));
+
         let new_route = Route::new(path, "PUT", result); 
         self.routes.push(new_route); 
     }
 
     pub fn delete(&mut self, path: &str, result: Arc<dyn Fn(&mut Request, &mut Response) + Send + Sync + 'static>) {
+        assert!(path.starts_with("/"));
+
         let new_route = Route::new(path, "DELETE", result); 
         self.routes.push(new_route); 
     }
@@ -106,9 +114,7 @@ impl Server {
 
         for router in routers {
             if req.query.starts_with(router.root.as_str()) {
-                let sheared_query = req.query
-                    .clone()
-                    .replace(router.root.as_str(), "");
+                let sheared_query = req.query[router.root.len()..].to_string();
 
                 res_sent = router.handle_client(sheared_query, &mut req, &mut res);
             }
