@@ -1,5 +1,5 @@
 # wind
-A lightweight, multithreaded rust web framework built with no external dependencies. It is inspired by express.js and uses similar syntax when creating endpoints for a REST API.
+A lightweight, multithreaded rust web server library built with no external dependencies. It is inspired by express.js and uses similar syntax when creating endpoints for a REST API.
 This project is a work in progress and still needs more documentation and testing, use caution if trying it in your own project
 
 ## Motivation
